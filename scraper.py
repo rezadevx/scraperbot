@@ -27,6 +27,7 @@ async def scrape_and_invite(session_str: str, target: str):
 
     await client.start()
 
+    # Ambil target grup
     if target.startswith("https://t.me/"):
         target_entity = await client.get_entity(target)
     else:
@@ -38,12 +39,13 @@ async def scrape_and_invite(session_str: str, target: str):
 
     for dialog in dialogs:
         entity = dialog.entity
+
         is_valid_group = (
             isinstance(entity, Chat) or (
                 isinstance(entity, Channel)
                 and entity.megagroup
                 and not entity.broadcast
-                and not entity.linked_chat_id
+                and (not hasattr(entity, "linked_chat_id") or entity.linked_chat_id is None)
             )
         )
 
@@ -65,7 +67,7 @@ async def scrape_and_invite(session_str: str, target: str):
                     except UserAlreadyParticipantError:
                         print("⚠️ Sudah ada di grup.")
                     except UserPrivacyRestrictedError:
-                        print("🔒 Tidak bisa diundang.")
+                        print("🔒 Tidak bisa diundang (privasi).")
                     except FloodWaitError as e:
                         print(f"⏳ FloodWait: {e.seconds}s")
                         await asyncio.sleep(e.seconds)
@@ -75,15 +77,16 @@ async def scrape_and_invite(session_str: str, target: str):
                     await asyncio.sleep(SAFE_DELAY)
 
         except Exception as e:
-            print(f"⚠️ Gagal scrape {entity.title}: {e}")
+            print(f"⚠️ Gagal scrape {getattr(entity, 'title', 'grup')}: {e}")
             continue
 
+    # Sisa batch terakhir
     if batch:
         try:
             await client(InviteToChannelRequest(target_entity, batch))
             invited += len(batch)
         except Exception as e:
-            print(f"❌ Invite error (batch akhir): {e}")
+            print(f"❌ Invite error (akhir): {e}")
 
     await client.disconnect()
     return invited

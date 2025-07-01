@@ -10,23 +10,18 @@ from config import API_ID, API_HASH
 BATCH_SIZE = 3
 DELAY_MIN, DELAY_MAX = 9, 20
 MAX_RETRIES = 5
-FLOOD_CAP = 600
 flood_wait_until = None
-
 DEVICE_LIST = [
     "Samsung Galaxy S23", "Pixel 8 Pro", "Xiaomi 14", "Huawei Mate 50"
 ]
 
 def is_safe_user(user):
-    if user.bot or getattr(user, "deleted", False):
-        return False
-    if not user.first_name:
-        return False
+    if user.bot or getattr(user, "deleted", False): return False
+    if not user.first_name: return False
     if isinstance(user.status, UserStatusOffline):
         if hasattr(user.status, "was_online"):
             days = (datetime.datetime.now(timezone.utc) - user.status.was_online).days
-            if days > 30:
-                return False
+            if days > 30: return False
     return True
 
 async def sleep_log(sec, tag=""):
@@ -55,6 +50,10 @@ async def can_invite(client, user, target_entity):
         print(f"🌊 FloodWait (check): {e.seconds}s")
         await asyncio.sleep(e.seconds + 5)
         return False
+    except FloodError as e:
+        print(f"🚫 Flood Error (limit harian?): {e}")
+        await sleep_log(600, "FloodError Global")
+        return False
     except Exception as e:
         print(f"⚠️ Invite Check Error: {e}")
         return False
@@ -72,6 +71,9 @@ async def safe_invite(client, target, users):
         except FloodWaitError as e:
             flood_wait_until = datetime.datetime.now() + datetime.timedelta(seconds=e.seconds + 5)
             await sleep_log(e.seconds + 5, "FloodInvite")
+        except FloodError as e:
+            print(f"🚫 Flood Global: {e}")
+            await sleep_log(600, "FloodError")
         except Exception as e:
             print(f"🔁 Invite Error [{attempt}]: {e}")
             await sleep_log(10 + attempt * 5, "Retry")
@@ -109,6 +111,7 @@ async def scrape_and_invite(session_str, target):
             continue
 
         print(f"📥 Grup: {getattr(entity, 'title', 'tanpa nama')}")
+
         try:
             offline_users, online_users = [], []
 

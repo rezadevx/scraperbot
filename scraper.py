@@ -1,4 +1,5 @@
 import asyncio, random, datetime
+from datetime import timezone
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import *
@@ -23,7 +24,7 @@ def is_safe_user(user):
     if isinstance(user.status, UserStatusOffline):
         if hasattr(user.status, "was_online"):
             last_seen = user.status.was_online
-            days = (datetime.datetime.now() - last_seen).days
+            days = (datetime.datetime.now(timezone.utc) - last_seen).days
             if days > 30:
                 return False
     return True

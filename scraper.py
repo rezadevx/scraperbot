@@ -11,6 +11,7 @@ BATCH_SIZE = 3
 DELAY_MIN, DELAY_MAX = 9, 20
 MAX_RETRIES = 5
 FLOOD_CAP = 600
+flood_wait_until = None
 
 DEVICE_LIST = [
     "Samsung Galaxy S23", "Pixel 8 Pro", "Xiaomi 14", "Huawei Mate 50"
@@ -33,18 +34,38 @@ async def sleep_log(sec, tag=""):
     print(f"🕒 Tidur {sec}s {tag}")
     await asyncio.sleep(sec)
 
+async def wait_global_flood():
+    global flood_wait_until
+    if flood_wait_until:
+        now = datetime.datetime.now()
+        if now < flood_wait_until:
+            sleep_seconds = (flood_wait_until - now).seconds
+            print(f"🌐 Menunggu global FloodWait {sleep_seconds}s")
+            await asyncio.sleep(sleep_seconds)
+
 async def can_invite(client, user, target_entity):
     try:
+        await wait_global_flood()
         await client(InviteToChannelRequest(target_entity, [user.id]))
         return True
-    except (UserAlreadyParticipantError, UserPrivacyRestrictedError):
+    except UserAlreadyParticipantError:
+        return False
+    except UserPrivacyRestrictedError:
+        return False
+    except FloodWaitError as e:
+        global flood_wait_until
+        flood_wait_until = datetime.datetime.now() + datetime.timedelta(seconds=e.seconds + 5)
+        print(f"🌊 FloodWait (check): {e.seconds}s")
+        await asyncio.sleep(e.seconds + 5)
         return False
     except:
-        return True  # asumsikan bisa
+        return True
 
 async def safe_invite(client, target, users):
+    global flood_wait_until
     for attempt in range(1, MAX_RETRIES + 1):
         try:
+            await wait_global_flood()
             await client(InviteToChannelRequest(target, users))
             print(f"✅ Diundang: {users}")
             return True
@@ -53,12 +74,13 @@ async def safe_invite(client, target, users):
         except UserPrivacyRestrictedError:
             return False
         except FloodWaitError as e:
-            wait = min(e.seconds, FLOOD_CAP)
-            print(f"🌊 FloodWait {wait}s (invite)")
-            await sleep_log(wait, "FloodInvite")
+            flood_wait_until = datetime.datetime.now() + datetime.timedelta(seconds=e.seconds + 5)
+            print(f"🌊 FloodWait {e.seconds}s (invite batch)")
+            await sleep_log(e.seconds + 5, "FloodInvite")
         except Exception as e:
             print(f"🔁 Error [{attempt}]: {e}")
-            await sleep_log(10)
+            delay = 10 + attempt * 5
+            await sleep_log(delay, "RetryError")
     return False
 
 async def scrape_and_invite(session_str, target):
@@ -123,9 +145,9 @@ async def scrape_and_invite(session_str, target):
                     invited += len(batch)
 
         except FloodWaitError as e:
-            wait = min(e.seconds, FLOOD_CAP)
-            print(f"🌊 Flood saat scraping: {wait}s")
-            await sleep_log(wait, "FloodScrape")
+            flood_wait_until = datetime.datetime.now() + datetime.timedelta(seconds=e.seconds + 5)
+            print(f"🌊 Flood saat scraping: {e.seconds}s")
+            await sleep_log(e.seconds + 5, "FloodScrape")
         except Exception as e:
             print(f"⚠️ Gagal scrape: {e}")
             await sleep_log(15, "error scrape")

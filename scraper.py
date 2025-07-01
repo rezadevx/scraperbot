@@ -1,20 +1,24 @@
+# ultimate_scraper.py
 import asyncio, random, datetime
 from datetime import timezone
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import *
+from telethon.tl.functions.contacts import AddContactRequest
 from telethon.tl.functions.channels import InviteToChannelRequest
-from telethon.tl.types import Chat, Channel, PeerChannel, UserStatusOffline
+from telethon.tl.types import Chat, Channel, PeerChannel, UserStatusRecently, UserStatusOffline
 from config import API_ID, API_HASH
+import time
 
 BATCH_SIZE = 2
 ROLING_INTERVAL = 1  # per user
 ROLING_DELAY = 6     # setelah culik batch
 MAX_RETRIES = 5
+DAILY_INVITE_LIMIT = 20
 flood_wait_until = None
-DEVICE_LIST = [
-    "Samsung Galaxy S23", "Pixel 8 Pro", "Xiaomi 14", "Huawei Mate 50"
-]
+DEVICE_LIST = ["Samsung Galaxy S23", "Pixel 8 Pro", "Xiaomi 14", "Huawei Mate 50"]
+invite_history = {}
+
 
 def is_safe_user(user):
     if user.bot or getattr(user, "deleted", False): return False
@@ -38,42 +42,63 @@ async def wait_global_flood():
             print(f"🌐 Menunggu FloodWait global {s}s")
             await asyncio.sleep(s)
 
-async def can_invite(client, user, target_entity):
+async def contact_greeting(client, user):
+    try:
+        await client(AddContactRequest(
+            id=user.id,
+            first_name=user.first_name or "-",
+            last_name=user.last_name or "",
+            phone="0000000000"
+        ))
+        await client.send_message(user.id, "Hai, salam kenal dari bot ✨")
+        await sleep_log(random.randint(5, 15), "greeting")
+    except:
+        pass
+
+async def can_invite(client, user, target_entity, session_id):
     try:
         await wait_global_flood()
+        # Check daily limit
+        today = datetime.date.today().isoformat()
+        if invite_history.get(session_id, {}).get(today, 0) >= DAILY_INVITE_LIMIT:
+            print(f"🚫 Batas harian tercapai untuk session {session_id}")
+            return False
+
+        # Greeting first
+        await contact_greeting(client, user)
+
         await client(InviteToChannelRequest(target_entity, [user.id]))
+
+        # Record invite
+        invite_history.setdefault(session_id, {}).setdefault(today, 0)
+        invite_history[session_id][today] += 1
         return True
     except (UserAlreadyParticipantError, UserPrivacyRestrictedError):
         return False
     except FloodWaitError as e:
         global flood_wait_until
         flood_wait_until = datetime.datetime.now() + datetime.timedelta(seconds=e.seconds + 5)
-        print(f"🌊 FloodWait (check): {e.seconds}s")
+        print(f"🌊 FloodWait: {e.seconds}s")
         await asyncio.sleep(e.seconds + 5)
         return False
     except FloodError as e:
-        print(f"🚫 Flood Error (limit harian?): {e}")
-        await sleep_log(600, "FloodError Global")
+        print(f"🚫 Flood Error: {e}")
+        await sleep_log(600, "FloodError")
         return False
     except Exception as e:
         print(f"⚠️ Invite Check Error: {e}")
         return False
 
 async def safe_invite(client, target, users):
-    global flood_wait_until
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             await wait_global_flood()
             await client(InviteToChannelRequest(target, users))
             print(f"✅ Diundang: {users}")
             return True
-        except (UserAlreadyParticipantError, UserPrivacyRestrictedError):
-            return False
         except FloodWaitError as e:
-            flood_wait_until = datetime.datetime.now() + datetime.timedelta(seconds=e.seconds + 5)
-            await sleep_log(e.seconds + 5, "FloodInvite")
+            await sleep_log(e.seconds + 5, "FloodWait")
         except FloodError as e:
-            print(f"🚫 Flood Global: {e}")
             await sleep_log(600, "FloodError")
         except Exception as e:
             print(f"🔁 Invite Error [{attempt}]: {e}")
@@ -81,6 +106,7 @@ async def safe_invite(client, target, users):
     return False
 
 async def scrape_and_invite(session_str, target):
+    session_id = session_str[:20]
     client = TelegramClient(
         StringSession(session_str),
         API_ID,
@@ -120,18 +146,14 @@ async def scrape_and_invite(session_str, target):
                 try:
                     if not is_safe_user(user) or user.id in invited_ids:
                         continue
-                    if not await can_invite(client, user, target_entity):
-                        continue
-
-                    if isinstance(user.status, UserStatusOffline):
-                        offline_users.append(user)
-                    else:
+                    if isinstance(user.status, UserStatusRecently):
                         online_users.append(user)
-                except Exception as e:
-                    print(f"⚠️ Gagal baca user: {e}")
+                    else:
+                        offline_users.append(user)
+                except:
                     continue
 
-            all_users = offline_users + online_users
+            all_users = online_users + offline_users
             batch = []
 
             for user in all_users:
@@ -143,7 +165,7 @@ async def scrape_and_invite(session_str, target):
                 await sleep_log(ROLING_INTERVAL, "roling user")
 
                 if len(batch) == BATCH_SIZE:
-                    if await safe_invite(client, target_entity, batch):
+                    if await can_invite(client, user, target_entity, session_id):
                         invited += len(batch)
                     batch.clear()
                     await sleep_log(ROLING_DELAY, "roling batch")
@@ -153,7 +175,6 @@ async def scrape_and_invite(session_str, target):
                     invited += len(batch)
 
         except FloodWaitError as e:
-            flood_wait_until = datetime.datetime.now() + datetime.timedelta(seconds=e.seconds + 5)
             await sleep_log(e.seconds + 5, "FloodScrape")
         except Exception as e:
             print(f"⚠️ Gagal scraping grup: {e}")

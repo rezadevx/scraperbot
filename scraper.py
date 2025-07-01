@@ -24,8 +24,7 @@ def is_safe_user(user):
         return False
     if isinstance(user.status, UserStatusOffline):
         if hasattr(user.status, "was_online"):
-            last_seen = user.status.was_online
-            days = (datetime.datetime.now(timezone.utc) - last_seen).days
+            days = (datetime.datetime.now(timezone.utc) - user.status.was_online).days
             if days > 30:
                 return False
     return True
@@ -39,18 +38,16 @@ async def wait_global_flood():
     if flood_wait_until:
         now = datetime.datetime.now()
         if now < flood_wait_until:
-            sleep_seconds = (flood_wait_until - now).seconds
-            print(f"🌐 Menunggu global FloodWait {sleep_seconds}s")
-            await asyncio.sleep(sleep_seconds)
+            s = (flood_wait_until - now).seconds
+            print(f"🌐 Menunggu FloodWait global {s}s")
+            await asyncio.sleep(s)
 
 async def can_invite(client, user, target_entity):
     try:
         await wait_global_flood()
         await client(InviteToChannelRequest(target_entity, [user.id]))
         return True
-    except UserAlreadyParticipantError:
-        return False
-    except UserPrivacyRestrictedError:
+    except (UserAlreadyParticipantError, UserPrivacyRestrictedError):
         return False
     except FloodWaitError as e:
         global flood_wait_until
@@ -58,8 +55,9 @@ async def can_invite(client, user, target_entity):
         print(f"🌊 FloodWait (check): {e.seconds}s")
         await asyncio.sleep(e.seconds + 5)
         return False
-    except:
-        return True
+    except Exception as e:
+        print(f"⚠️ Invite Check Error: {e}")
+        return False
 
 async def safe_invite(client, target, users):
     global flood_wait_until
@@ -69,18 +67,14 @@ async def safe_invite(client, target, users):
             await client(InviteToChannelRequest(target, users))
             print(f"✅ Diundang: {users}")
             return True
-        except UserAlreadyParticipantError:
-            return True
-        except UserPrivacyRestrictedError:
+        except (UserAlreadyParticipantError, UserPrivacyRestrictedError):
             return False
         except FloodWaitError as e:
             flood_wait_until = datetime.datetime.now() + datetime.timedelta(seconds=e.seconds + 5)
-            print(f"🌊 FloodWait {e.seconds}s (invite batch)")
             await sleep_log(e.seconds + 5, "FloodInvite")
         except Exception as e:
-            print(f"🔁 Error [{attempt}]: {e}")
-            delay = 10 + attempt * 5
-            await sleep_log(delay, "RetryError")
+            print(f"🔁 Invite Error [{attempt}]: {e}")
+            await sleep_log(10 + attempt * 5, "Retry")
     return False
 
 async def scrape_and_invite(session_str, target):
@@ -96,7 +90,12 @@ async def scrape_and_invite(session_str, target):
     )
 
     await client.start()
-    target_entity = await client.get_entity(target) if "t.me/" in target else await client.get_entity(PeerChannel(int(target)))
+    try:
+        target_entity = await client.get_entity(target if "t.me/" in target else PeerChannel(int(target)))
+    except Exception as e:
+        print(f"❌ Tidak bisa ambil target grup: {e}")
+        return
+
     dialogs = await client.get_dialogs()
     invited_ids = set()
     invited = 0
@@ -104,26 +103,29 @@ async def scrape_and_invite(session_str, target):
     for dialog in dialogs:
         entity = dialog.entity
         if not (
-            isinstance(entity, Chat) or
-            (isinstance(entity, Channel) and entity.megagroup and not entity.broadcast and not getattr(entity, "linked_chat_id", None))
+            isinstance(entity, Chat)
+            or (isinstance(entity, Channel) and entity.megagroup and not entity.broadcast and not getattr(entity, "linked_chat_id", None))
         ):
             continue
 
         print(f"📥 Grup: {getattr(entity, 'title', 'tanpa nama')}")
-
         try:
             offline_users, online_users = [], []
 
             async for user in client.iter_participants(entity.id):
-                if not is_safe_user(user) or user.id in invited_ids:
-                    continue
-                if not await can_invite(client, user, target_entity):
-                    continue
+                try:
+                    if not is_safe_user(user) or user.id in invited_ids:
+                        continue
+                    if not await can_invite(client, user, target_entity):
+                        continue
 
-                if isinstance(user.status, UserStatusOffline):
-                    offline_users.append(user)
-                else:
-                    online_users.append(user)
+                    if isinstance(user.status, UserStatusOffline):
+                        offline_users.append(user)
+                    else:
+                        online_users.append(user)
+                except Exception as e:
+                    print(f"⚠️ Gagal baca user: {e}")
+                    continue
 
             all_users = offline_users + online_users
             batch = []
@@ -146,10 +148,9 @@ async def scrape_and_invite(session_str, target):
 
         except FloodWaitError as e:
             flood_wait_until = datetime.datetime.now() + datetime.timedelta(seconds=e.seconds + 5)
-            print(f"🌊 Flood saat scraping: {e.seconds}s")
             await sleep_log(e.seconds + 5, "FloodScrape")
         except Exception as e:
-            print(f"⚠️ Gagal scrape: {e}")
+            print(f"⚠️ Gagal scraping grup: {e}")
             await sleep_log(15, "error scrape")
 
     await client.disconnect()

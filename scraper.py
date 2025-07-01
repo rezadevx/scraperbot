@@ -33,6 +33,15 @@ async def sleep_log(sec, tag=""):
     print(f"🕒 Tidur {sec}s {tag}")
     await asyncio.sleep(sec)
 
+async def can_invite(client, user, target_entity):
+    try:
+        await client(InviteToChannelRequest(target_entity, [user.id]))
+        return True
+    except (UserAlreadyParticipantError, UserPrivacyRestrictedError):
+        return False
+    except:
+        return True  # asumsikan bisa
+
 async def safe_invite(client, target, users):
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -85,6 +94,8 @@ async def scrape_and_invite(session_str, target):
 
             async for user in client.iter_participants(entity.id):
                 if not is_safe_user(user) or user.id in invited_ids:
+                    continue
+                if not await can_invite(client, user, target_entity):
                     continue
 
                 if isinstance(user.status, UserStatusOffline):

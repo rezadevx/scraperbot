@@ -7,8 +7,9 @@ from telethon.tl.functions.channels import InviteToChannelRequest
 from telethon.tl.types import Chat, Channel, PeerChannel, UserStatusOffline
 from config import API_ID, API_HASH
 
-BATCH_SIZE = 3
-DELAY_MIN, DELAY_MAX = 9, 20
+BATCH_SIZE = 2
+ROLING_INTERVAL = 1  # per user
+ROLING_DELAY = 6     # setelah culik batch
 MAX_RETRIES = 5
 flood_wait_until = None
 DEVICE_LIST = [
@@ -139,11 +140,13 @@ async def scrape_and_invite(session_str, target):
                 batch.append(user.id)
                 invited_ids.add(user.id)
 
+                await sleep_log(ROLING_INTERVAL, "roling user")
+
                 if len(batch) == BATCH_SIZE:
                     if await safe_invite(client, target_entity, batch):
                         invited += len(batch)
                     batch.clear()
-                    await sleep_log(random.randint(DELAY_MIN, DELAY_MAX), "jeda batch")
+                    await sleep_log(ROLING_DELAY, "roling batch")
 
             if batch:
                 if await safe_invite(client, target_entity, batch):

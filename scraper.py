@@ -3,16 +3,15 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.channels import InviteToChannelRequest
 from telethon.errors import (
-    FloodWait,
+    FloodWaitError,
     UserPrivacyRestrictedError,
     UserAlreadyParticipantError
 )
 from telethon.tl.types import Channel, Chat, PeerChannel
 from config import API_ID, API_HASH
 
-SAFE_DELAY = 9        # jeda antar batch (detik)
-BATCH_SIZE = 3        # undang 3 user per batch
-
+SAFE_DELAY = 9
+BATCH_SIZE = 3
 
 async def scrape_and_invite(session_str: str, target: str):
     client = TelegramClient(
@@ -28,7 +27,6 @@ async def scrape_and_invite(session_str: str, target: str):
 
     await client.start()
 
-    # Dapatkan entitas target grup dari link atau ID
     if target.startswith("https://t.me/"):
         target_entity = await client.get_entity(target)
     else:
@@ -40,10 +38,8 @@ async def scrape_and_invite(session_str: str, target: str):
 
     for dialog in dialogs:
         entity = dialog.entity
-
         is_valid_group = (
-            isinstance(entity, Chat)
-            or (
+            isinstance(entity, Chat) or (
                 isinstance(entity, Channel)
                 and entity.megagroup
                 and not entity.broadcast
@@ -70,12 +66,11 @@ async def scrape_and_invite(session_str: str, target: str):
                         print("⚠️ Sudah ada di grup.")
                     except UserPrivacyRestrictedError:
                         print("🔒 Tidak bisa diundang.")
-                    except FloodWait as e:
+                    except FloodWaitError as e:
                         print(f"⏳ FloodWait: {e.seconds}s")
                         await asyncio.sleep(e.seconds)
                     except Exception as e:
                         print(f"❌ Invite error: {e}")
-
                     batch.clear()
                     await asyncio.sleep(SAFE_DELAY)
 
@@ -83,7 +78,6 @@ async def scrape_and_invite(session_str: str, target: str):
             print(f"⚠️ Gagal scrape {entity.title}: {e}")
             continue
 
-    # Invite sisa batch terakhir
     if batch:
         try:
             await client(InviteToChannelRequest(target_entity, batch))
